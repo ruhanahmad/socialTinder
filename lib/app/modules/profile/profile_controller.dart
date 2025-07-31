@@ -46,8 +46,8 @@ class ProfileController extends GetxController {
   void updateAge(int value) => age.value = value;
   void updateLocation(String value) => location.value = value;
   void updateHeight(double value) => height.value = value;
-  void updateGender(String value) => gender.value = value;
-  void updateNationality(String value) => nationality.value = value;
+  void updateGender(String? value) => gender.value = value ?? '';
+  void updateNationality(String? value) => nationality.value = value ?? '';
 
   void toggleInterest(String interest) {
     if (interests.contains(interest)) {

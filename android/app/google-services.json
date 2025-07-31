@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "636818226950",
+    "project_id": "socialtinder",
+    "storage_bucket": "socialtinder.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:636818226950:android:f21570359af3e60ce92887",
+        "android_client_info": {
+          "package_name": "com.example.social_tinder"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCJOTsnn_SqCaZN9lDHQE2W7ukZn2olvz8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

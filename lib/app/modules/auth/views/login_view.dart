@@ -3,7 +3,7 @@ import 'package:get/get.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../theme/app_theme.dart';
 import '../auth_controller.dart';
-import '../../routes/app_routes.dart';
+import '../../../routes/app_routes.dart';
 
 class LoginView extends GetView<AuthController> {
   const LoginView({super.key});
@@ -205,7 +205,7 @@ class LoginView extends GetView<AuthController> {
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
                     _buildBeachElement(Icons.beach_access, 'Beach'),
-                    _buildBeachElement(Icons.palm_tree, 'Palm Trees'),
+                    _buildBeachElement(Icons.park, 'Palm Trees'),
                     _buildBeachElement(Icons.water, 'Ocean'),
                   ],
                 ),

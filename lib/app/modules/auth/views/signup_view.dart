@@ -3,7 +3,7 @@ import 'package:get/get.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../theme/app_theme.dart';
 import '../auth_controller.dart';
-import '../../routes/app_routes.dart';
+import '../../../routes/app_routes.dart';
 
 class SignupView extends GetView<AuthController> {
   const SignupView({super.key});

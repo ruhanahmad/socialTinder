@@ -267,4 +267,11 @@ class RestaurantsController extends GetxController {
   void clearError() {
     errorMessage.value = '';
   }
+
+  // Update methods for form fields
+  void updateRestaurantName(String value) => restaurantName.value = value;
+  void updateDescription(String value) => description.value = value;
+  void updateAddress(String value) => address.value = value;
+  void updatePhone(String value) => phone.value = value;
+  void updateWebsite(String value) => website.value = value;
 } 

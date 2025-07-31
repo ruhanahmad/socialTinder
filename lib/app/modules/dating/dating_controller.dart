@@ -178,8 +178,8 @@ class DatingController extends GetxController {
   void updateMinAge(int value) => minAge.value = value;
   void updateMaxAge(int value) => maxAge.value = value;
   void updateMaxDistance(double value) => maxDistance.value = value;
-  void updatePreferredGender(String value) => preferredGender.value = value;
-  void updatePreferredNationality(String value) => preferredNationality.value = value;
+  void updatePreferredGender(String? value) => preferredGender.value = value ?? '';
+  void updatePreferredNationality(String? value) => preferredNationality.value = value ?? '';
 
   void applyFilters() {
     loadPotentialMatches();

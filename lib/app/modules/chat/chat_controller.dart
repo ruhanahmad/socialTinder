@@ -124,4 +124,10 @@ class ChatController extends GetxController {
   void clearError() {
     errorMessage.value = '';
   }
+
+  void updateNewMessage(String value) {
+    newMessage.value = value;
+  }
+
+  String get currentUserId => _auth.currentUser?.uid ?? '';
 } 

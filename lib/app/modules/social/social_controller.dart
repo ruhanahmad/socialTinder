@@ -195,4 +195,10 @@ class SocialController extends GetxController {
   void clearError() {
     errorMessage.value = '';
   }
+
+  // Update methods
+  void updateNewPostText(String value) => newPostText.value = value;
+
+  // Getter for current user ID
+  String get currentUserId => _auth.currentUser?.uid ?? '';
 } 

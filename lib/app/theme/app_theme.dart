@@ -56,7 +56,7 @@ class AppTheme {
         hintStyle: const TextStyle(color: lightText),
         contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: white,
         elevation: 5,
         shape: RoundedRectangleBorder(
@@ -146,7 +146,7 @@ class AppTheme {
         hintStyle: const TextStyle(color: lightText),
         contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: const Color(0xFF2C2C2C),
         elevation: 5,
         shape: RoundedRectangleBorder(
