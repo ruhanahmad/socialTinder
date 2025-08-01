@@ -8,6 +8,12 @@ class AuthController extends GetxController {
   final RxBool isLoading = false.obs;
   final RxString errorMessage = ''.obs;
 
+  @override
+  void onInit() {
+    super.onInit();
+    print('AuthController initialized');
+  }
+
   Future<void> signIn(String email, String password) async {
     try {
       isLoading.value = true;

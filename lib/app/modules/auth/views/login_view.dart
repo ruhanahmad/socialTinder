@@ -10,6 +10,7 @@ class LoginView extends GetView<AuthController> {
 
   @override
   Widget build(BuildContext context) {
+    print('LoginView build called');
     final emailController = TextEditingController();
     final passwordController = TextEditingController();
 
@@ -107,7 +108,7 @@ class LoginView extends GetView<AuthController> {
                         SizedBox(height: ScreenUtil().setHeight(20)),
                         
                         // Password Field
-                        Obx(() => TextField(
+                        TextField(
                           controller: passwordController,
                           obscureText: true,
                           decoration: const InputDecoration(
@@ -117,55 +118,60 @@ class LoginView extends GetView<AuthController> {
                               borderRadius: BorderRadius.all(Radius.circular(15)),
                             ),
                           ),
-                        )),
+                        ),
                         
                         SizedBox(height: ScreenUtil().setHeight(30)),
                         
                         // Error Message
-                        Obx(() => controller.errorMessage.isNotEmpty
-                            ? Container(
-                                width: double.infinity,
-                                padding: EdgeInsets.all(ScreenUtil().setWidth(10)),
-                                decoration: BoxDecoration(
-                                  color: Colors.red.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: Colors.red),
-                                ),
-                                child: Text(
-                                  controller.errorMessage.value,
-                                  style: const TextStyle(color: Colors.red),
-                                  textAlign: TextAlign.center,
-                                ),
-                              )
-                            : const SizedBox.shrink()),
+                        Obx(() {
+                          if (controller.errorMessage.isNotEmpty) {
+                            return Container(
+                              width: double.infinity,
+                              padding: EdgeInsets.all(ScreenUtil().setWidth(10)),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.red),
+                              ),
+                              child: Text(
+                                controller.errorMessage.value,
+                                style: const TextStyle(color: Colors.red),
+                                textAlign: TextAlign.center,
+                              ),
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        }),
                         
                         SizedBox(height: ScreenUtil().setHeight(20)),
                         
                         // Login Button
-                        Obx(() => SizedBox(
-                          width: double.infinity,
-                          height: ScreenUtil().setHeight(50),
-                          child: ElevatedButton(
-                            onPressed: controller.isLoading.value
-                                ? null
-                                : () {
-                                    controller.clearError();
-                                    controller.signIn(
-                                      emailController.text.trim(),
-                                      passwordController.text,
-                                    );
-                                  },
-                            child: controller.isLoading.value
-                                ? const CircularProgressIndicator(color: AppTheme.white)
-                                : Text(
-                                    'Sign In',
-                                    style: TextStyle(
-                                      fontSize: ScreenUtil().setSp(16),
-                                      fontWeight: FontWeight.bold,
+                        Obx(() {
+                          return SizedBox(
+                            width: double.infinity,
+                            height: ScreenUtil().setHeight(50),
+                            child: ElevatedButton(
+                              onPressed: controller.isLoading.value
+                                  ? null
+                                  : () {
+                                      controller.clearError();
+                                      controller.signIn(
+                                        emailController.text.trim(),
+                                        passwordController.text,
+                                      );
+                                    },
+                              child: controller.isLoading.value
+                                  ? const CircularProgressIndicator(color: AppTheme.white)
+                                  : Text(
+                                      'Sign In',
+                                      style: TextStyle(
+                                        fontSize: ScreenUtil().setSp(16),
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                     ),
-                                  ),
-                          ),
-                        )),
+                            ),
+                          );
+                        }),
                         
                         SizedBox(height: ScreenUtil().setHeight(20)),
                         
