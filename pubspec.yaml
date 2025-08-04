@@ -15,11 +15,14 @@ dependencies:
   # State Management
   get: ^4.6.6
   
-  # Firebase
+  # Firebase - Updated to latest compatible versions
   firebase_core: ^2.24.2
   firebase_auth: ^4.15.3
   cloud_firestore: ^4.13.6
   firebase_storage: ^11.5.6
+  
+  # Web dependencies for Firebase
+  js: ^0.6.7
   
   # UI & Responsiveness
   flutter_screenutil: ^5.9.0
