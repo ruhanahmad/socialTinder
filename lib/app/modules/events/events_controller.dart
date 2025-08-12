@@ -2,12 +2,10 @@ import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
-import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../data/api_config.dart';
 
 class EventsController extends GetxController {
-  // API base URL - replace with your Laravel API endpoint
-  final String apiBaseUrl = 'https://your-laravel-api.com/api';
   final ImagePicker _picker = ImagePicker();
   
   final RxBool isLoading = false.obs;
@@ -20,11 +18,11 @@ class EventsController extends GetxController {
   final RxString eventName = ''.obs;
   final RxString description = ''.obs;
   final RxString location = ''.obs;
-  final RxString date = ''.obs;
-  final RxString time = ''.obs;
+  final Rx<DateTime?> date = Rx<DateTime?>(null);
+  final RxString time = ''.obs; // The view will provide this in 'HH:mm' format
   final RxDouble ticketPrice = 0.0.obs;
   final RxInt maxTickets = 100.obs;
-  final RxList<String> images = <String>[].obs;
+  final RxList<dynamic> images = <dynamic>[].obs; // For URLs (String) and new files (XFile)
 
   @override
   void onInit() {
@@ -37,212 +35,185 @@ class EventsController extends GetxController {
   Future<void> loadEvents() async {
     try {
       isLoading.value = true;
-      
-      // Get auth token from SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      
-      // Call API to get events
+      errorMessage.value = '';
       final response = await http.get(
-        Uri.parse('$apiBaseUrl/events'),
-        headers: {
-          'Authorization': token != null ? 'Bearer $token' : '',
-          'Content-Type': 'application/json',
-        },
+        Uri.parse('${ApiConfig.baseUrl}/events'),
+        headers: {'Accept': 'application/json'},
       );
-
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         events.value = List<Map<String, dynamic>>.from(data['events']);
-          ...data,
-        };
-      }).toList();
+      } else {
+        errorMessage.value = 'Failed to load events: ${response.body}';
+      }
     } catch (e) {
-      errorMessage.value = 'Failed to load events';
+      errorMessage.value = 'An error occurred: $e';
     } finally {
       isLoading.value = false;
     }
+  }
+
+  Future<void> _withAuthToken(Future<void> Function(String token) action) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) {
+      errorMessage.value = 'Authentication error. Please log in again.';
+      return;
+    }
+    await action(token);
   }
 
   Future<void> loadUserEvents() async {
-    try {
-      final user = _auth.currentUser;
-      if (user == null) return;
-
-      final QuerySnapshot snapshot = await _firestore
-          .collection('events')
-          .where('promoterId', isEqualTo: user.uid)
-          .get();
-
-      userEvents.value = snapshot.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        return {
-          'id': doc.id,
-          ...data,
-        };
-      }).toList();
-    } catch (e) {
-      errorMessage.value = 'Failed to load user events';
-    }
+    await _withAuthToken((token) async {
+      try {
+        final response = await http.get(
+          Uri.parse('${ApiConfig.baseUrl}/my-events'),
+          headers: {'Authorization': 'Bearer $token', 'Accept': 'application/json'},
+        );
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          userEvents.value = List<Map<String, dynamic>>.from(data['events']);
+        } else {
+          errorMessage.value = 'Failed to load your events: ${response.body}';
+        }
+      } catch (e) {
+        errorMessage.value = 'An error occurred: $e';
+      }
+    });
   }
 
   Future<void> loadUserTickets() async {
-    try {
-      final user = _auth.currentUser;
-      if (user == null) return;
-
-      final QuerySnapshot snapshot = await _firestore
-          .collection('tickets')
-          .where('userId', isEqualTo: user.uid)
-          .get();
-
-      userTickets.value = snapshot.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        return {
-          'id': doc.id,
-          ...data,
-        };
-      }).toList();
-    } catch (e) {
-      errorMessage.value = 'Failed to load user tickets';
-    }
+    await _withAuthToken((token) async {
+      try {
+        final response = await http.get(
+          Uri.parse('${ApiConfig.baseUrl}/my-tickets'),
+          headers: {'Authorization': 'Bearer $token', 'Accept': 'application/json'},
+        );
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          userTickets.value = List<Map<String, dynamic>>.from(data['tickets']);
+        } else {
+          errorMessage.value = 'Failed to load your tickets: ${response.body}';
+        }
+      } catch (e) {
+        errorMessage.value = 'An error occurred: $e';
+      }
+    });
   }
 
   Future<void> createEvent() async {
-    if (eventName.value.isEmpty || description.value.isEmpty || 
-        location.value.isEmpty || date.value.isEmpty || time.value.isEmpty) {
-      errorMessage.value = 'Please fill in all required fields';
+    if (eventName.value.isEmpty || description.value.isEmpty || location.value.isEmpty || date.value == null || time.value.isEmpty) {
+      errorMessage.value = 'Please fill in all required fields.';
       return;
     }
 
-    try {
+    await _withAuthToken((token) async {
       isLoading.value = true;
-      final user = _auth.currentUser;
-      if (user == null) {
-        errorMessage.value = 'User not authenticated';
-        return;
+      errorMessage.value = '';
+      try {
+        var request = http.MultipartRequest('POST', Uri.parse('${ApiConfig.baseUrl}/events'))
+          ..headers['Authorization'] = 'Bearer $token'
+          ..headers['Accept'] = 'application/json';
+
+        // Combine date and time, assuming time is in 'HH:mm' format
+        final datePart = date.value!.toIso8601String().substring(0, 10);
+        final dateTimeString = '$datePart ${time.value}:00';
+
+        request.fields.addAll({
+          'name': eventName.value,
+          'description': description.value,
+          'location': location.value,
+          'date_time': dateTimeString,
+          'ticket_price': ticketPrice.value.toString(),
+          'max_tickets': maxTickets.value.toString(),
+        });
+
+        for (var image in images.whereType<XFile>()) {
+          request.files.add(await http.MultipartFile.fromPath('images[]', image.path));
+        }
+
+        final response = await request.send();
+        final responseBody = await response.stream.bytesToString();
+
+        if (response.statusCode == 201) {
+          Get.back();
+          _clearForm();
+          await loadUserEvents();
+          await loadEvents();
+          Get.snackbar('Success', 'Event created successfully!');
+        } else {
+          errorMessage.value = 'Failed to create event: $responseBody';
+        }
+      } catch (e) {
+        errorMessage.value = 'An error occurred: $e';
+      } finally {
+        isLoading.value = false;
       }
-
-      // Upload images if any
-      List<String> imageUrls = [];
-      for (String imagePath in images) {
-        final fileName = '${DateTime.now().millisecondsSinceEpoch}_${imagePath.split('/').last}';
-        final ref = _storage.ref().child('event_images/$fileName');
-        await ref.putFile(File(imagePath));
-        final url = await ref.getDownloadURL();
-        imageUrls.add(url);
-      }
-
-      // Create event
-      await _firestore.collection('events').add({
-        'name': eventName.value,
-        'description': description.value,
-        'location': location.value,
-        'date': date.value,
-        'time': time.value,
-        'ticketPrice': ticketPrice.value,
-        'maxTickets': maxTickets.value,
-        'availableTickets': maxTickets.value,
-        'images': imageUrls,
-        'promoterId': user.uid,
-        'isActive': true,
-        'totalRevenue': 0.0,
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      // Clear form
-      _clearForm();
-      await loadUserEvents();
-    } catch (e) {
-      errorMessage.value = 'Failed to create event';
-    } finally {
-      isLoading.value = false;
-    }
+    });
   }
 
   Future<void> purchaseTicket(String eventId) async {
-    try {
-      final user = _auth.currentUser;
-      if (user == null) return;
+    await _withAuthToken((token) async {
+      isLoading.value = true;
+      try {
+        final response = await http.post(
+          Uri.parse('${ApiConfig.baseUrl}/events/$eventId/purchase'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Accept': 'application/json',
+          },
+        );
 
-      // Get event data
-      final eventDoc = await _firestore.collection('events').doc(eventId).get();
-      if (!eventDoc.exists) return;
-
-      final eventData = eventDoc.data() as Map<String, dynamic>;
-      final availableTickets = eventData['availableTickets'] ?? 0;
-      final ticketPrice = eventData['ticketPrice'] ?? 0.0;
-
-      if (availableTickets <= 0) {
-        errorMessage.value = 'No tickets available';
-        return;
+        final responseBody = json.decode(response.body);
+        if (response.statusCode == 200) {
+          await loadUserTickets();
+          Get.snackbar('Success', responseBody['message'] ?? 'Ticket purchased successfully!');
+        } else {
+          errorMessage.value = responseBody['message'] ?? 'Failed to purchase ticket.';
+          Get.snackbar('Error', errorMessage.value);
+        }
+      } catch (e) {
+        errorMessage.value = 'An error occurred: $e';
+      } finally {
+        isLoading.value = false;
       }
-
-      // Create ticket
-      await _firestore.collection('tickets').add({
-        'eventId': eventId,
-        'userId': user.uid,
-        'ticketPrice': ticketPrice,
-        'purchaseDate': FieldValue.serverTimestamp(),
-        'status': 'active',
-      });
-
-      // Update event
-      await _firestore.collection('events').doc(eventId).update({
-        'availableTickets': availableTickets - 1,
-        'totalRevenue': (eventData['totalRevenue'] ?? 0.0) + ticketPrice,
-      });
-
-      await loadUserTickets();
-    } catch (e) {
-      errorMessage.value = 'Failed to purchase ticket';
-    }
+    });
   }
 
   Future<void> pickImage() async {
     try {
-      final XFile? image = await _picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 80,
+      final List<XFile> pickedFiles = await _picker.pickMultiImage(
+        maxWidth: 1024, maxHeight: 1024, imageQuality: 80,
       );
-
-      if (image != null) {
-        images.add(image.path);
+      if (pickedFiles.isNotEmpty) {
+        images.addAll(pickedFiles);
       }
     } catch (e) {
-      errorMessage.value = 'Failed to pick image';
+      errorMessage.value = 'Failed to pick images: $e';
     }
   }
 
-  void removeImage(int index) {
-    if (index < images.length) {
-      images.removeAt(index);
-    }
-  }
-
-  void updateEventName(String value) => eventName.value = value;
-  void updateDescription(String value) => description.value = value;
-  void updateLocation(String value) => location.value = value;
-  void updateDate(String value) => date.value = value;
-  void updateTime(String value) => time.value = value;
-  void updateTicketPrice(double value) => ticketPrice.value = value;
-  void updateMaxTickets(int value) => maxTickets.value = value;
+  void removeImage(dynamic image) => images.remove(image);
 
   void _clearForm() {
     eventName.value = '';
     description.value = '';
     location.value = '';
-    date.value = '';
+    date.value = null;
     time.value = '';
     ticketPrice.value = 0.0;
     maxTickets.value = 100;
     images.clear();
   }
 
-  void clearError() {
-    errorMessage.value = '';
-  }
+  void clearError() => errorMessage.value = '';
+
+  // Update methods for form fields
+  void updateEventName(String value) => eventName.value = value;
+  void updateDescription(String value) => description.value = value;
+  void updateLocation(String value) => location.value = value;
+  void updateDate(DateTime? newDate) => date.value = newDate;
+  void updateTime(String newTime) => time.value = newTime;
+  void updateTicketPrice(double value) => ticketPrice.value = value;
+  void updateMaxTickets(int value) => maxTickets.value = value;
 }

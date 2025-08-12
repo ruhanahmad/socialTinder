@@ -1,20 +1,19 @@
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
-import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../data/api_config.dart';
 
 class RestaurantsController extends GetxController {
-  // API base URL - replace with your Laravel API endpoint
-  final String apiBaseUrl = 'https://your-laravel-api.com/api';
   final ImagePicker _picker = ImagePicker();
-  
+
   final RxBool isLoading = false.obs;
   final RxString errorMessage = ''.obs;
   final RxList<Map<String, dynamic>> restaurants = <Map<String, dynamic>>[].obs;
   final RxList<Map<String, dynamic>> userRestaurants = <Map<String, dynamic>>[].obs;
-  
+
   // Restaurant form fields
   final RxString restaurantName = ''.obs;
   final RxString description = ''.obs;
@@ -23,7 +22,8 @@ class RestaurantsController extends GetxController {
   final RxString website = ''.obs;
   final RxList<String> menuItems = <String>[].obs;
   final RxList<String> specials = <String>[].obs;
-  final RxList<String> images = <String>[].obs;
+  // Use a dynamic list to hold image URLs (String) and new local files (XFile)
+  final RxList<dynamic> images = <dynamic>[].obs;
 
   @override
   void onInit() {
@@ -32,230 +32,183 @@ class RestaurantsController extends GetxController {
     loadUserRestaurants();
   }
 
+  Future<void> _withAuthToken(Future<void> Function(String token) action) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) {
+      errorMessage.value = 'Authentication error. Please log in again.';
+      return;
+    }
+    await action(token);
+  }
+
   Future<void> loadRestaurants() async {
     try {
       isLoading.value = true;
-      
-      // Get auth token from SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      
-      // Call API to get restaurants
+      errorMessage.value = '';
+
       final response = await http.get(
-        Uri.parse('$apiBaseUrl/restaurants'),
-        headers: {
-          'Authorization': token != null ? 'Bearer $token' : '',
-          'Content-Type': 'application/json',
-        },
+        Uri.parse('${ApiConfig.baseUrl}/restaurants'),
+        headers: {'Accept': 'application/json'},
       );
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         restaurants.value = List<Map<String, dynamic>>.from(data['restaurants']);
-      }).toList();
+      } else {
+        errorMessage.value = 'Failed to load restaurants: ${response.body}';
+      }
     } catch (e) {
-      errorMessage.value = 'Failed to load restaurants';
+      errorMessage.value = 'An error occurred: $e';
     } finally {
       isLoading.value = false;
     }
   }
 
   Future<void> loadUserRestaurants() async {
-    try {
-      final user = _auth.currentUser;
-      if (user == null) return;
+    await _withAuthToken((token) async {
+      try {
+        final response = await http.get(
+          Uri.parse('${ApiConfig.baseUrl}/my-restaurants'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Accept': 'application/json',
+          },
+        );
 
-      final QuerySnapshot snapshot = await _firestore
-          .collection('restaurants')
-          .where('ownerId', isEqualTo: user.uid)
-          .get();
-
-      userRestaurants.value = snapshot.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        return {
-          'id': doc.id,
-          ...data,
-        };
-      }).toList();
-    } catch (e) {
-      errorMessage.value = 'Failed to load user restaurants';
-    }
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          userRestaurants.value = List<Map<String, dynamic>>.from(data['restaurants']);
+        } else {
+          errorMessage.value = 'Failed to load your restaurants: ${response.body}';
+        }
+      } catch (e) {
+        errorMessage.value = 'An error occurred: $e';
+      }
+    });
   }
 
-  Future<void> createRestaurant() async {
+  Future<void> saveRestaurant({String? restaurantId}) async {
     if (restaurantName.value.isEmpty || description.value.isEmpty || address.value.isEmpty) {
-      errorMessage.value = 'Please fill in all required fields';
+      errorMessage.value = 'Name, description, and address are required.';
       return;
     }
 
-    try {
+    await _withAuthToken((token) async {
       isLoading.value = true;
-      final user = _auth.currentUser;
-      if (user == null) {
-        errorMessage.value = 'User not authenticated';
-        return;
-      }
+      errorMessage.value = '';
+      try {
+        final isUpdating = restaurantId != null;
+        final uri = isUpdating
+            ? Uri.parse('${ApiConfig.baseUrl}/restaurants/$restaurantId')
+            : Uri.parse('${ApiConfig.baseUrl}/restaurants');
 
-      // Upload images if any
-      List<String> imageUrls = [];
-      for (String imagePath in images) {
-        final fileName = '${DateTime.now().millisecondsSinceEpoch}_${imagePath.split('/').last}';
-        final ref = _storage.ref().child('restaurant_images/$fileName');
-        await ref.putFile(File(imagePath));
-        final url = await ref.getDownloadURL();
-        imageUrls.add(url);
-      }
+        var request = http.MultipartRequest('POST', uri)
+          ..headers['Authorization'] = 'Bearer $token'
+          ..headers['Accept'] = 'application/json';
 
-      // Create restaurant
-      await _firestore.collection('restaurants').add({
-        'name': restaurantName.value,
-        'description': description.value,
-        'address': address.value,
-        'phone': phone.value,
-        'website': website.value,
-        'menuItems': menuItems.toList(),
-        'specials': specials.toList(),
-        'images': imageUrls,
-        'ownerId': user.uid,
-        'rating': 0.0,
-        'totalRatings': 0,
-        'isActive': true,
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      // Clear form
-      _clearForm();
-      await loadUserRestaurants();
-    } catch (e) {
-      errorMessage.value = 'Failed to create restaurant';
-    } finally {
-      isLoading.value = false;
-    }
-  }
-
-  Future<void> updateRestaurant(String restaurantId) async {
-    try {
-      isLoading.value = true;
-      
-      // Upload new images if any
-      List<String> imageUrls = [];
-      for (String imagePath in images) {
-        if (imagePath.startsWith('http')) {
-          imageUrls.add(imagePath); // Keep existing URLs
-        } else {
-          final fileName = '${DateTime.now().millisecondsSinceEpoch}_${imagePath.split('/').last}';
-          final ref = _storage.ref().child('restaurant_images/$fileName');
-          await ref.putFile(File(imagePath));
-          final url = await ref.getDownloadURL();
-          imageUrls.add(url);
+        if (isUpdating) {
+          request.fields['_method'] = 'PUT';
         }
+
+        request.fields.addAll({
+          'name': restaurantName.value,
+          'description': description.value,
+          'address': address.value,
+          'phone': phone.value,
+          'website': website.value,
+          'menu_items': json.encode(menuItems),
+          'specials': json.encode(specials),
+          'existing_images': json.encode(images.whereType<String>().toList()),
+        });
+
+        for (var image in images.whereType<XFile>()) {
+          request.files.add(await http.MultipartFile.fromPath('images[]', image.path));
+        }
+
+        final response = await request.send();
+        final responseBody = await response.stream.bytesToString();
+
+        if (response.statusCode == 200 || response.statusCode == 201) {
+          Get.back(); // Exit create/edit screen
+          _clearForm();
+          await loadUserRestaurants();
+          await loadRestaurants();
+          Get.snackbar('Success', 'Restaurant saved successfully!');
+        } else {
+          errorMessage.value = 'Save failed: $responseBody';
+        }
+      } catch (e) {
+        errorMessage.value = 'An error occurred: $e';
+      } finally {
+        isLoading.value = false;
       }
-
-      await _firestore.collection('restaurants').doc(restaurantId).update({
-        'name': restaurantName.value,
-        'description': description.value,
-        'address': address.value,
-        'phone': phone.value,
-        'website': website.value,
-        'menuItems': menuItems.toList(),
-        'specials': specials.toList(),
-        'images': imageUrls,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      _clearForm();
-      await loadUserRestaurants();
-    } catch (e) {
-      errorMessage.value = 'Failed to update restaurant';
-    } finally {
-      isLoading.value = false;
-    }
+    });
   }
 
   Future<void> rateRestaurant(String restaurantId, double rating) async {
-    try {
-      final user = _auth.currentUser;
-      if (user == null) return;
+    await _withAuthToken((token) async {
+      try {
+        final response = await http.post(
+          Uri.parse('${ApiConfig.baseUrl}/restaurants/$restaurantId/rate'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: json.encode({'rating': rating}),
+        );
 
-      // Get current restaurant data
-      final restaurantDoc = await _firestore.collection('restaurants').doc(restaurantId).get();
-      if (!restaurantDoc.exists) return;
-
-      final data = restaurantDoc.data() as Map<String, dynamic>;
-      final currentRating = data['rating'] ?? 0.0;
-      final totalRatings = data['totalRatings'] ?? 0;
-
-      // Calculate new rating
-      final newTotalRatings = totalRatings + 1;
-      final newRating = ((currentRating * totalRatings) + rating) / newTotalRatings;
-
-      // Update restaurant rating
-      await _firestore.collection('restaurants').doc(restaurantId).update({
-        'rating': newRating,
-        'totalRatings': newTotalRatings,
-      });
-
-      // Record user rating
-      await _firestore.collection('restaurant_ratings').add({
-        'restaurantId': restaurantId,
-        'userId': user.uid,
-        'rating': rating,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-
-      await loadRestaurants();
-    } catch (e) {
-      errorMessage.value = 'Failed to rate restaurant';
-    }
+        if (response.statusCode == 200) {
+          await loadRestaurants();
+          Get.snackbar('Success', 'Rating submitted!');
+        } else {
+          errorMessage.value = 'Rating failed: ${response.body}';
+        }
+      } catch (e) {
+        errorMessage.value = 'An error occurred: $e';
+      }
+    });
   }
 
   Future<void> pickImage() async {
     try {
-      final XFile? image = await _picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 80,
+      final List<XFile> pickedFiles = await _picker.pickMultiImage(
+        maxWidth: 1024, maxHeight: 1024, imageQuality: 80,
       );
-
-      if (image != null) {
-        images.add(image.path);
+      if (pickedFiles.isNotEmpty) {
+        images.addAll(pickedFiles);
       }
     } catch (e) {
-      errorMessage.value = 'Failed to pick image';
+      errorMessage.value = 'Failed to pick images: $e';
     }
   }
 
-  void removeImage(int index) {
-    if (index < images.length) {
-      images.removeAt(index);
-    }
+  void removeImage(dynamic image) => images.remove(image);
+
+  void setFormForEdit(Map<String, dynamic> restaurant) {
+    _clearForm();
+    restaurantName.value = restaurant['name'] ?? '';
+    description.value = restaurant['description'] ?? '';
+    address.value = restaurant['address'] ?? '';
+    phone.value = restaurant['phone'] ?? '';
+    website.value = restaurant['website'] ?? '';
+    menuItems.value = List<String>.from(restaurant['menu_items'] ?? []);
+    specials.value = List<String>.from(restaurant['specials'] ?? []);
+    images.value = List<dynamic>.from(restaurant['images'] ?? []);
   }
 
   void addMenuItem(String item) {
-    if (item.trim().isNotEmpty) {
-      menuItems.add(item.trim());
-    }
+    if (item.trim().isNotEmpty) menuItems.add(item.trim());
   }
 
-  void removeMenuItem(int index) {
-    if (index < menuItems.length) {
-      menuItems.removeAt(index);
-    }
-  }
+  void removeMenuItem(int index) => menuItems.removeAt(index);
 
   void addSpecial(String special) {
-    if (special.trim().isNotEmpty) {
-      specials.add(special.trim());
-    }
+    if (special.trim().isNotEmpty) specials.add(special.trim());
   }
 
-  void removeSpecial(int index) {
-    if (index < specials.length) {
-      specials.removeAt(index);
-    }
-  }
+  void removeSpecial(int index) => specials.removeAt(index);
 
   void _clearForm() {
     restaurantName.value = '';
@@ -268,9 +221,7 @@ class RestaurantsController extends GetxController {
     images.clear();
   }
 
-  void clearError() {
-    errorMessage.value = '';
-  }
+  void clearError() => errorMessage.value = '';
 
   // Update methods for form fields
   void updateRestaurantName(String value) => restaurantName.value = value;

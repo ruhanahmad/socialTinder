@@ -2,20 +2,19 @@ import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
-import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../data/api_config.dart';
 
 class SocialController extends GetxController {
-  // API base URL - replace with your Laravel API endpoint
-  final String apiBaseUrl = 'https://your-laravel-api.com/api';
   final ImagePicker _picker = ImagePicker();
   
   final RxBool isLoading = false.obs;
   final RxString errorMessage = ''.obs;
   final RxList<Map<String, dynamic>> posts = <Map<String, dynamic>>[].obs;
-  final RxList<String> friends = <String>[].obs;
+  final RxList<Map<String, dynamic>> friends = <Map<String, dynamic>>[].obs;
+
   final RxString newPostText = ''.obs;
-  final RxList<String> selectedImages = <String>[].obs;
+  final RxList<XFile> newPostImages = <XFile>[].obs;
 
   @override
   void onInit() {
@@ -24,185 +23,186 @@ class SocialController extends GetxController {
     loadFriends();
   }
 
-  Future<void> loadPosts() async {
-    try {
-      isLoading.value = true;
-      
-      // Get auth token from SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      
-      // Call API to get posts
-      final response = await http.get(
-        Uri.parse('$apiBaseUrl/posts'),
-        headers: {
-          'Authorization': token != null ? 'Bearer $token' : '',
-          'Content-Type': 'application/json',
-        },
-      );
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        posts.value = List<Map<String, dynamic>>.from(data['posts']);
-      }
-    } catch (e) {
-      errorMessage.value = 'Failed to load posts';
-    } finally {
-      isLoading.value = false;
+  Future<void> _withAuthToken(Future<void> Function(String token) action) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) {
+      errorMessage.value = 'Authentication error. Please log in again.';
+      return;
     }
+    await action(token);
+  }
+
+  Future<void> loadPosts() async {
+    await _withAuthToken((token) async {
+      try {
+        isLoading.value = true;
+        errorMessage.value = '';
+        final response = await http.get(
+          Uri.parse('${ApiConfig.baseUrl}/posts'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Accept': 'application/json',
+          },
+        );
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          posts.value = List<Map<String, dynamic>>.from(data['posts']);
+        } else {
+          errorMessage.value = 'Failed to load posts: ${response.body}';
+        }
+      } catch (e) {
+        errorMessage.value = 'An error occurred: $e';
+      } finally {
+        isLoading.value = false;
+      }
+    });
   }
 
   Future<void> loadFriends() async {
-    try {
-      final user = _auth.currentUser;
-      if (user != null) {
-        final doc = await _firestore.collection('users').doc(user.uid).get();
-        if (doc.exists) {
-          final data = doc.data() as Map<String, dynamic>;
-          friends.value = List<String>.from(data['friends'] ?? []);
+    await _withAuthToken((token) async {
+      try {
+        final response = await http.get(
+          Uri.parse('${ApiConfig.baseUrl}/friends'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Accept': 'application/json',
+          },
+        );
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          friends.value = List<Map<String, dynamic>>.from(data['friends']);
+        } else {
+          errorMessage.value = 'Failed to load friends: ${response.body}';
         }
+      } catch (e) {
+        errorMessage.value = 'An error occurred: $e';
       }
-    } catch (e) {
-      errorMessage.value = 'Failed to load friends';
-    }
+    });
   }
 
   Future<void> createPost() async {
-    if (newPostText.value.trim().isEmpty && selectedImages.isEmpty) {
-      errorMessage.value = 'Please add some content to your post';
+    if (newPostText.value.trim().isEmpty && newPostImages.isEmpty) {
+      errorMessage.value = 'Please write something or add an image.';
       return;
     }
 
-    try {
+    await _withAuthToken((token) async {
       isLoading.value = true;
-      final user = _auth.currentUser;
-      if (user == null) {
-        errorMessage.value = 'User not authenticated';
-        return;
+      errorMessage.value = '';
+      try {
+        var request = http.MultipartRequest('POST', Uri.parse('${ApiConfig.baseUrl}/posts'))
+          ..headers['Authorization'] = 'Bearer $token'
+          ..headers['Accept'] = 'application/json'
+          ..fields['text'] = newPostText.value.trim();
+
+        for (var imageFile in newPostImages) {
+          request.files.add(await http.MultipartFile.fromPath('images[]', imageFile.path));
+        }
+
+        final response = await request.send();
+        final responseBody = await response.stream.bytesToString();
+
+        if (response.statusCode == 201) {
+          newPostText.value = '';
+          newPostImages.clear();
+          await loadPosts(); // Refresh posts
+        } else {
+          errorMessage.value = 'Failed to create post: $responseBody';
+        }
+      } catch (e) {
+        errorMessage.value = 'An error occurred: $e';
+      } finally {
+        isLoading.value = false;
       }
-
-      // Upload images if any
-      List<String> imageUrls = [];
-      for (String imagePath in selectedImages) {
-        final fileName = '${DateTime.now().millisecondsSinceEpoch}_${imagePath.split('/').last}';
-        final ref = _storage.ref().child('post_images/$fileName');
-        await ref.putFile(File(imagePath));
-        final url = await ref.getDownloadURL();
-        imageUrls.add(url);
-      }
-
-      // Create post
-      await _firestore.collection('posts').add({
-        'userId': user.uid,
-        'text': newPostText.value.trim(),
-        'images': imageUrls,
-        'createdAt': FieldValue.serverTimestamp(),
-        'likes': [],
-        'comments': [],
-      });
-
-      // Clear form
-      newPostText.value = '';
-      selectedImages.clear();
-      
-      // Reload posts
-      await loadPosts();
-    } catch (e) {
-      errorMessage.value = 'Failed to create post';
-    } finally {
-      isLoading.value = false;
-    }
-  }
-
-  Future<void> pickImage() async {
-    try {
-      final XFile? image = await _picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 80,
-      );
-
-      if (image != null) {
-        selectedImages.add(image.path);
-      }
-    } catch (e) {
-      errorMessage.value = 'Failed to pick image';
-    }
-  }
-
-  void removeImage(int index) {
-    if (index < selectedImages.length) {
-      selectedImages.removeAt(index);
-    }
-  }
-
-  Future<void> addFriend(String username) async {
-    try {
-      final user = _auth.currentUser;
-      if (user == null) return;
-
-      // Find user by username
-      final QuerySnapshot snapshot = await _firestore
-          .collection('users')
-          .where('username', isEqualTo: username)
-          .get();
-
-      if (snapshot.docs.isEmpty) {
-        errorMessage.value = 'User not found';
-        return;
-      }
-
-      final friendId = snapshot.docs.first.id;
-      if (friendId == user.uid) {
-        errorMessage.value = 'You cannot add yourself as a friend';
-        return;
-      }
-
-      // Add to friends list
-      await _firestore.collection('users').doc(user.uid).update({
-        'friends': FieldValue.arrayUnion([friendId])
-      });
-
-      await loadFriends();
-    } catch (e) {
-      errorMessage.value = 'Failed to add friend';
-    }
+    });
   }
 
   Future<void> likePost(String postId) async {
-    try {
-      final user = _auth.currentUser;
-      if (user == null) return;
+    await _withAuthToken((token) async {
+      final postIndex = posts.indexWhere((p) => p['id'].toString() == postId);
+      if (postIndex == -1) return;
 
-      final postRef = _firestore.collection('posts').doc(postId);
-      final post = await postRef.get();
-      
-      if (post.exists) {
-        final data = post.data() as Map<String, dynamic>;
-        final likes = List<String>.from(data['likes'] ?? []);
-        
-        if (likes.contains(user.uid)) {
-          likes.remove(user.uid);
+      // Optimistic update
+      final post = posts[postIndex];
+      final isLiked = post['is_liked_by_user'] ?? false;
+      final likesCount = post['likes_count'] ?? 0;
+      posts[postIndex] = {
+        ...post,
+        'is_liked_by_user': !isLiked,
+        'likes_count': isLiked ? likesCount - 1 : likesCount + 1,
+      };
+
+      try {
+        final response = await http.post(
+          Uri.parse('${ApiConfig.baseUrl}/posts/$postId/like'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Accept': 'application/json',
+          },
+        );
+
+        if (response.statusCode != 200) {
+          await loadPosts(); // Revert on failure
+          errorMessage.value = 'Failed to update like status.';
         } else {
-          likes.add(user.uid);
+           final updatedPost = json.decode(response.body)['post'];
+           posts[postIndex] = updatedPost;
         }
-        
-        await postRef.update({'likes': likes});
-        await loadPosts();
+      } catch (e) {
+        await loadPosts(); // Revert on failure
+        errorMessage.value = 'An error occurred: $e';
+      }
+    });
+  }
+
+  Future<void> addFriend(String userId) async {
+    await _withAuthToken((token) async {
+      try {
+        final response = await http.post(
+          Uri.parse('${ApiConfig.baseUrl}/friends/add'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: json.encode({'user_id': userId}),
+        );
+        if (response.statusCode == 200) {
+          await loadFriends();
+          Get.snackbar('Success', 'Friend request sent!');
+        } else {
+          errorMessage.value = 'Failed to add friend: ${json.decode(response.body)['message']}';
+        }
+      } catch (e) {
+        errorMessage.value = 'An error occurred: $e';
+      }
+    });
+  }
+
+  Future<void> pickImages() async {
+    try {
+      final List<XFile> pickedFiles = await _picker.pickMultiImage(
+        maxWidth: 1024, maxHeight: 1024, imageQuality: 80,
+      );
+      if (pickedFiles.isNotEmpty) {
+        newPostImages.addAll(pickedFiles);
       }
     } catch (e) {
-      errorMessage.value = 'Failed to like post';
+      errorMessage.value = 'Failed to pick images: $e';
     }
+  }
+
+  void removeNewPostImage(XFile image) {
+    newPostImages.remove(image);
+  }
+
+  void onPostTextChanged(String text) {
+    newPostText.value = text;
   }
 
   void clearError() {
     errorMessage.value = '';
   }
-
-  // Update methods
-  void updateNewPostText(String value) => newPostText.value = value;
-
-  // Getter for current user ID
-  String get currentUserId => _auth.currentUser?.uid ?? '';
 }
