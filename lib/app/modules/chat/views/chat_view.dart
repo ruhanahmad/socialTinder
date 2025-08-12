@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -47,65 +48,75 @@ class ChatView extends GetView<ChatController> {
   }
 
   Widget _buildChatItem(Map<String, dynamic> match) {
-    return FutureBuilder<String>(
-      future: controller.getOtherUserName(match['id']),
-      builder: (context, snapshot) {
-        final userName = snapshot.data ?? 'Unknown';
-        
-        return Card(
-          margin: EdgeInsets.only(bottom: ScreenUtil().setHeight(10)),
-          child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: AppTheme.primaryYellow,
-              child: Text(
-                userName.isNotEmpty ? userName[0].toUpperCase() : '?',
-                style: TextStyle(
-                  color: AppTheme.darkText,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            title: Text(
-              userName,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: ScreenUtil().setSp(16),
-              ),
-            ),
-            subtitle: Text(
-              match['lastMessage'] ?? 'Start a conversation!',
-              style: TextStyle(
-                color: AppTheme.lightText,
-                fontSize: ScreenUtil().setSp(14),
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            trailing: Icon(
-              Icons.chat_bubble_outline,
-              color: AppTheme.primaryYellow,
-            ),
-            onTap: () => _openChat(match['id'], userName),
+    final partnerName = match['partner_name'] ?? 'Unknown';
+    final lastMessage = match['last_message'] ?? 'Start a conversation!';
+    final partnerPhotoUrl = match['partner_photo_url'];
+
+    return Card(
+      margin: EdgeInsets.only(bottom: ScreenUtil().setHeight(10)),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: AppTheme.lightYellow,
+          backgroundImage: (partnerPhotoUrl != null && partnerPhotoUrl.isNotEmpty)
+              ? CachedNetworkImageProvider(partnerPhotoUrl)
+              : null,
+          child: (partnerPhotoUrl == null || partnerPhotoUrl.isEmpty)
+              ? Text(
+                  partnerName.isNotEmpty ? partnerName[0].toUpperCase() : '?',
+                  style: const TextStyle(
+                    color: AppTheme.darkText,
+                    fontWeight: FontWeight.bold,
+                  ),
+                )
+              : null,
+        ),
+        title: Text(
+          partnerName,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: ScreenUtil().setSp(16),
           ),
-        );
-      },
+        ),
+        subtitle: Text(
+          lastMessage,
+          style: TextStyle(
+            color: AppTheme.lightText,
+            fontSize: ScreenUtil().setSp(14),
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: const Icon(
+          Icons.chat_bubble_outline,
+          color: AppTheme.primaryYellow,
+        ),
+        onTap: () => _openChat(match['id'].toString(), partnerName),
+      ),
     );
   }
 
   void _openChat(String matchId, String userName) {
-    controller.loadMessages(matchId);
-    Get.to(() => _buildChatScreen(matchId, userName));
+    controller.selectMatch(matchId, userName);
+    Get.to(() => _buildChatScreen());
   }
 
-  Widget _buildChatScreen(String matchId, String userName) {
+  Widget _buildChatScreen() {
+    final TextEditingController textController = TextEditingController();
+
+    // When the chat screen is built, make sure the text field reflects the controller's state.
+    textController.text = controller.newMessage.value;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(userName),
+        title: Obx(() => Text(controller.currentChatPartnerName.value)),
         backgroundColor: AppTheme.primaryYellow,
         foregroundColor: AppTheme.darkText,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Get.back(),
+          onPressed: () {
+            controller.selectMatch('', ''); // Deselect match when going back
+            Get.back();
+          },
         ),
       ),
       body: Container(
@@ -124,13 +135,15 @@ class ChatView extends GetView<ChatController> {
             // Messages List
             Expanded(
               child: Obx(() => ListView.builder(
-                padding: EdgeInsets.all(ScreenUtil().setWidth(15)),
-                itemCount: controller.messages.length,
-                itemBuilder: (context, index) {
-                  final message = controller.messages[index];
-                  return _buildMessageBubble(message);
-                },
-              )),
+                    padding: EdgeInsets.all(ScreenUtil().setWidth(15)),
+                    itemCount: controller.messages.length,
+                    reverse: true, // Show latest messages at the bottom
+                    itemBuilder: (context, index) {
+                      final message =
+                          controller.messages.reversed.toList()[index];
+                      return _buildMessageBubble(message);
+                    },
+                  )),
             ),
             
             // Message Input
@@ -150,7 +163,8 @@ class ChatView extends GetView<ChatController> {
                 children: [
                   Expanded(
                     child: TextField(
-                      onChanged: controller.updateNewMessage,
+                      controller: textController,
+                      onChanged: controller.onNewMessageChanged,
                       decoration: const InputDecoration(
                         hintText: 'Type a message...',
                         border: OutlineInputBorder(
@@ -165,16 +179,19 @@ class ChatView extends GetView<ChatController> {
                   ),
                   SizedBox(width: ScreenUtil().setWidth(10)),
                   Obx(() => IconButton(
-                    onPressed: controller.newMessage.value.trim().isNotEmpty
-                        ? () => controller.sendMessage(controller.newMessage.value)
-                        : null,
-                    icon: Icon(
-                      Icons.send,
-                      color: controller.newMessage.value.trim().isNotEmpty
-                          ? AppTheme.primaryYellow
-                          : AppTheme.lightText,
-                    ),
-                  )),
+                        onPressed: controller.newMessage.value.trim().isNotEmpty
+                            ? () {
+                                controller.sendMessage();
+                                textController.clear();
+                              }
+                            : null,
+                        icon: Icon(
+                          Icons.send,
+                          color: controller.newMessage.value.trim().isNotEmpty
+                              ? AppTheme.primaryYellow
+                              : AppTheme.lightText,
+                        ),
+                      )),
                 ],
               ),
             ),
@@ -185,7 +202,7 @@ class ChatView extends GetView<ChatController> {
   }
 
   Widget _buildMessageBubble(Map<String, dynamic> message) {
-    final isCurrentUser = message['senderId'] == controller.currentUserId;
+    final isCurrentUser = message['sender_id'].toString() == controller.currentUserId;
     
     return Align(
       alignment: isCurrentUser ? Alignment.centerRight : Alignment.centerLeft,

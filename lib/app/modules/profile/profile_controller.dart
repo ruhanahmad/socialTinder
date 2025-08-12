@@ -2,20 +2,18 @@ import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:io';
 import 'dart:convert';
 import '../../routes/app_routes.dart';
+import '../../data/api_config.dart';
 
 class ProfileController extends GetxController {
-  // API base URL - replace with your Laravel API endpoint
-  final String apiBaseUrl = 'https://your-laravel-api.com/api';
   final ImagePicker _picker = ImagePicker();
   
   final RxBool isLoading = false.obs;
   final RxString errorMessage = ''.obs;
-  final RxList<String> photos = <String>[].obs;
-  final RxString selectedGender = ''.obs;
-  final RxString selectedNationality = ''.obs;
+
+  // Use a dynamic list to hold image URLs (String) and new local files (XFile)
+  final RxList<dynamic> photos = <dynamic>[].obs;
   
   // Profile fields
   final RxString name = ''.obs;
@@ -56,61 +54,24 @@ class ProfileController extends GetxController {
     }
   }
 
-  Future<void> pickImage() async {
+  Future<void> pickImages() async {
     try {
-      final XFile? image = await _picker.pickImage(
-        source: ImageSource.gallery,
+      final List<XFile> pickedFiles = await _picker.pickMultiImage(
         maxWidth: 1024,
         maxHeight: 1024,
         imageQuality: 80,
       );
 
-      if (image != null) {
-        isLoading.value = true;
-        
-        // Get auth token from SharedPreferences
-        final prefs = await SharedPreferences.getInstance();
-        final token = prefs.getString('auth_token');
-        if (token == null) {
-          errorMessage.value = 'User not authenticated.';
-          isLoading.value = false;
-          return;
-        }
-        
-        // Create form data for image upload
-        var request = http.MultipartRequest(
-          'POST',
-          Uri.parse('$apiBaseUrl/profile/upload-photo'),
-        );
-        
-        request.headers['Authorization'] = 'Bearer $token';
-        request.files.add(await http.MultipartFile.fromPath(
-          'photo',
-          image.path,
-        ));
-        
-        var response = await request.send();
-        
-        if (response.statusCode == 200) {
-          var responseData = await response.stream.bytesToString();
-          var data = json.decode(responseData);
-          photos.add(data['photo_url']);
-        } else {
-          errorMessage.value = 'Failed to upload image. Please try again.';
-        }
-        
-        isLoading.value = false;
+      if (pickedFiles.isNotEmpty) {
+        photos.addAll(pickedFiles);
       }
     } catch (e) {
-      isLoading.value = false;
-      errorMessage.value = 'Failed to upload image. Please try again.';
+      errorMessage.value = 'Failed to pick images. Please try again.';
     }
   }
 
-  void removePhoto(int index) {
-    if (index < photos.length) {
-      photos.removeAt(index);
-    }
+  void removePhoto(dynamic photo) {
+    photos.remove(photo);
   }
 
   Future<void> saveProfile() async {
@@ -124,39 +85,42 @@ class ProfileController extends GetxController {
       isLoading.value = true;
       errorMessage.value = '';
 
-      // Get auth token from SharedPreferences
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
       if (token == null) {
         errorMessage.value = 'User not authenticated.';
+        isLoading.value = false;
         return;
       }
 
-      final profileData = {
-        'name': name.value,
-        'age': age.value,
-        'location': location.value,
-        'nationality': nationality.value,
-        'gender': gender.value,
-        'height': height.value,
-        'interests': interests.toList(),
-        'photos': photos.toList(),
-      };
+      var request = http.MultipartRequest('POST', Uri.parse('${ApiConfig.baseUrl}/profile'));
+      request.headers['Authorization'] = 'Bearer $token';
+      request.headers['Accept'] = 'application/json';
 
-      // Call API to save profile
-      final response = await http.post(
-        Uri.parse('$apiBaseUrl/profile'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: json.encode(profileData),
-      );
+      request.fields['name'] = name.value;
+      request.fields['age'] = age.value.toString();
+      request.fields['location'] = location.value;
+      request.fields['nationality'] = nationality.value;
+      request.fields['gender'] = gender.value;
+      request.fields['height'] = height.value.toString();
+      request.fields['interests'] = json.encode(interests);
+
+      // Separate existing photos from new ones
+      List<String> existingPhotos = photos.whereType<String>().toList();
+      request.fields['existing_photos'] = json.encode(existingPhotos);
+
+      List<XFile> newPhotos = photos.whereType<XFile>().toList();
+      for (var photoFile in newPhotos) {
+        request.files.add(await http.MultipartFile.fromPath('photos[]', photoFile.path));
+      }
+
+      var response = await request.send();
+      final responseBody = await response.stream.bytesToString();
 
       if (response.statusCode == 200) {
         Get.offAllNamed(AppRoutes.MAIN_HOME);
       } else {
-        errorMessage.value = 'Failed to save profile. Please try again.';
+        errorMessage.value = 'Failed to save profile: $responseBody';
       }
     } catch (e) {
       errorMessage.value = 'Failed to save profile. Please try again.';

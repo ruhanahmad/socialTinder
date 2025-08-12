@@ -1,11 +1,11 @@
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../routes/app_routes.dart';
+import '../../data/api_config.dart';
 
 class AuthController extends GetxController {
-  // API base URL - replace with your Laravel API endpoint
-  final String apiBaseUrl = 'https://your-laravel-api.com/api';
-  
   final RxBool isLoading = false.obs;
   final RxString errorMessage = ''.obs;
   final RxString token = ''.obs;
@@ -21,22 +21,25 @@ class AuthController extends GetxController {
       isLoading.value = true;
       errorMessage.value = '';
       
-      // Call Laravel API for login
       final response = await http.post(
-        Uri.parse('$apiBaseUrl/login'),
+        Uri.parse('${ApiConfig.baseUrl}/login'),
         body: {
           'email': email,
           'password': password,
         },
+        headers: {
+          'Accept': 'application/json',
+        },
       );
       
       if (response.statusCode == 200) {
-        // Parse the response and save token
-        // This is a placeholder - adjust based on your API response structure
-        // final responseData = jsonDecode(response.body);
-        // token.value = responseData['token'];
-        
-        Get.offAllNamed(AppRoutes.PROFILE_SETUP);
+        final responseData = jsonDecode(response.body);
+        token.value = responseData['token'];
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('auth_token', token.value);
+        await prefs.setString('user_id', responseData['user']['id'].toString());
+
+        Get.offAllNamed(AppRoutes.MAIN_HOME);
       } else {
         errorMessage.value = 'Invalid credentials';
       }
@@ -52,46 +55,34 @@ class AuthController extends GetxController {
       isLoading.value = true;
       errorMessage.value = '';
       
-      // Call Laravel API for registration
       final response = await http.post(
-        Uri.parse('$apiBaseUrl/register'),
+        Uri.parse('${ApiConfig.baseUrl}/register'),
         body: {
+          'name': 'New User', // The API likely requires a name
           'email': email,
           'password': password,
           'password_confirmation': password,
         },
+        headers: {
+          'Accept': 'application/json',
+        },
       );
       
       if (response.statusCode == 201) {
-        // Parse the response and save token
-        // This is a placeholder - adjust based on your API response structure
-        // final responseData = jsonDecode(response.body);
-        // token.value = responseData['token'];
+        final responseData = jsonDecode(response.body);
+        token.value = responseData['token'];
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('auth_token', token.value);
+        await prefs.setString('user_id', responseData['user']['id'].toString());
         
         Get.offAllNamed(AppRoutes.PROFILE_SETUP);
       } else {
-        errorMessage.value = 'Registration failed';
+        errorMessage.value = 'Registration failed: ${response.body}';
       }
     } catch (e) {
       errorMessage.value = 'An error occurred. Please try again.';
     } finally {
       isLoading.value = false;
-    }
-  }
-
-  // Helper method to handle API error responses
-  String _getErrorMessage(int statusCode) {
-    switch (statusCode) {
-      case 401:
-        return 'Invalid credentials.';
-      case 422:
-        return 'Validation error. Please check your input.';
-      case 409:
-        return 'An account already exists with this email.';
-      case 500:
-        return 'Server error. Please try again later.';
-      default:
-        return 'An error occurred. Please try again.';
     }
   }
 

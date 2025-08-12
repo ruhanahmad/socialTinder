@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:intl/intl.dart';
 import '../../../theme/app_theme.dart';
 import '../events_controller.dart';
 
@@ -93,6 +94,17 @@ class EventsView extends GetView<EventsController> {
   }
 
   Widget _buildEventCard(Map<String, dynamic> event, bool showPurchaseButton) {
+    // Safely parse the date
+    DateTime? eventDateTime;
+    if (event['date_time'] != null) {
+      try {
+        eventDateTime = DateTime.parse(event['date_time']).toLocal();
+      } catch (e) {
+        // Handle potential parsing errors
+        print('Error parsing date: ${event['date_time']}');
+      }
+    }
+
     return Card(
       margin: EdgeInsets.only(bottom: ScreenUtil().setHeight(15)),
       child: Column(
@@ -146,7 +158,9 @@ class EventsView extends GetView<EventsController> {
                     Icon(Icons.calendar_today, size: ScreenUtil().setSp(16), color: AppTheme.lightText),
                     SizedBox(width: ScreenUtil().setWidth(5)),
                     Text(
-                      '${event['date']} at ${event['time']}',
+                      eventDateTime != null
+                          ? DateFormat.yMMMd().add_jm().format(eventDateTime)
+                          : 'Date not available',
                       style: TextStyle(
                         fontSize: ScreenUtil().setSp(14),
                         color: AppTheme.lightText,
@@ -195,7 +209,7 @@ class EventsView extends GetView<EventsController> {
                     Icon(Icons.attach_money, size: ScreenUtil().setSp(16), color: AppTheme.primaryYellow),
                     SizedBox(width: ScreenUtil().setWidth(5)),
                     Text(
-                      '\$${(event['ticketPrice'] ?? 0.0).toStringAsFixed(2)}',
+                      '\$${(event['ticket_price'] ?? 0.0).toStringAsFixed(2)}',
                       style: TextStyle(
                         fontSize: ScreenUtil().setSp(16),
                         fontWeight: FontWeight.bold,
@@ -204,7 +218,7 @@ class EventsView extends GetView<EventsController> {
                     ),
                     const Spacer(),
                     Text(
-                      '${event['availableTickets'] ?? 0} tickets left',
+                      '${event['available_tickets'] ?? 0} tickets left',
                       style: TextStyle(
                         fontSize: ScreenUtil().setSp(14),
                         color: AppTheme.lightText,
@@ -227,7 +241,7 @@ class EventsView extends GetView<EventsController> {
                     if (showPurchaseButton) ...[
                       SizedBox(width: ScreenUtil().setWidth(10)),
                       ElevatedButton(
-                        onPressed: () => _purchaseTicket(event['id']),
+                        onPressed: () => _purchaseTicket(event['id'].toString()),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppTheme.oceanBlue,
                         ),
@@ -351,21 +365,25 @@ class EventsView extends GetView<EventsController> {
                 'Date & Time:',
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
-              Text('${event['date']} at ${event['time']}'),
+              Text(
+                event['date_time'] != null
+                    ? DateFormat.yMMMd().add_jm().format(DateTime.parse(event['date_time']).toLocal())
+                    : 'Date not available',
+              ),
               SizedBox(height: ScreenUtil().setHeight(10)),
               
               Text(
                 'Ticket Price:',
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
-              Text('\$${(event['ticketPrice'] ?? 0.0).toStringAsFixed(2)}'),
+              Text('\$${(event['ticket_price'] ?? 0.0).toStringAsFixed(2)}'),
               SizedBox(height: ScreenUtil().setHeight(10)),
               
               Text(
                 'Available Tickets:',
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
-              Text('${event['availableTickets'] ?? 0}'),
+              Text('${event['available_tickets'] ?? 0}'),
             ],
           ),
         ),
@@ -440,21 +458,43 @@ class EventsView extends GetView<EventsController> {
                 onChanged: controller.updateLocation,
               ),
               SizedBox(height: ScreenUtil().setHeight(10)),
-              TextField(
-                controller: dateController,
-                decoration: const InputDecoration(
-                  labelText: 'Date * (YYYY-MM-DD)',
-                ),
-                onChanged: controller.updateDate,
-              ),
+              Obx(() => Row(
+                    children: [
+                      const Icon(Icons.calendar_today, color: AppTheme.lightText),
+                      SizedBox(width: ScreenUtil().setWidth(10)),
+                      Expanded(
+                        child: Text(
+                          controller.date.value != null
+                              ? DateFormat.yMMMMd().format(controller.date.value!)
+                              : 'Select Date *',
+                          style: TextStyle(fontSize: ScreenUtil().setSp(16)),
+                        ),
+                      ),
+                      ElevatedButton(
+                        onPressed: () => controller.selectDate(context),
+                        child: const Text('Select'),
+                      ),
+                    ],
+                  )),
               SizedBox(height: ScreenUtil().setHeight(10)),
-              TextField(
-                controller: timeController,
-                decoration: const InputDecoration(
-                  labelText: 'Time * (HH:MM)',
-                ),
-                onChanged: controller.updateTime,
-              ),
+              Obx(() => Row(
+                    children: [
+                      const Icon(Icons.access_time, color: AppTheme.lightText),
+                      SizedBox(width: ScreenUtil().setWidth(10)),
+                      Expanded(
+                        child: Text(
+                          controller.time.value != null
+                              ? controller.time.value!.format(context)
+                              : 'Select Time *',
+                          style: TextStyle(fontSize: ScreenUtil().setSp(16)),
+                        ),
+                      ),
+                      ElevatedButton(
+                        onPressed: () => controller.selectTime(context),
+                        child: const Text('Select'),
+                      ),
+                    ],
+                  )),
               SizedBox(height: ScreenUtil().setHeight(10)),
               Row(
                 children: [

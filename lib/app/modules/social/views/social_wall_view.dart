@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'dart:io';
+import 'package:intl/intl.dart';
 import '../../../theme/app_theme.dart';
 import '../social_controller.dart';
 
@@ -62,7 +63,7 @@ class SocialWallView extends GetView<SocialController> {
           children: [
             // Text Input
             TextField(
-              onChanged: controller.updateNewPostText,
+              onChanged: controller.onPostTextChanged,
               maxLines: 3,
               decoration: const InputDecoration(
                 hintText: 'What\'s on your mind?',
@@ -73,13 +74,14 @@ class SocialWallView extends GetView<SocialController> {
             SizedBox(height: ScreenUtil().setHeight(10)),
             
             // Image Preview
-            Obx(() => controller.selectedImages.isNotEmpty
+            Obx(() => controller.newPostImages.isNotEmpty
                 ? Container(
                     height: ScreenUtil().setHeight(100),
                     child: ListView.builder(
                       scrollDirection: Axis.horizontal,
-                      itemCount: controller.selectedImages.length,
+                      itemCount: controller.newPostImages.length,
                       itemBuilder: (context, index) {
+                        final image = controller.newPostImages[index];
                         return Container(
                           margin: EdgeInsets.only(right: ScreenUtil().setWidth(10)),
                           child: Stack(
@@ -87,7 +89,7 @@ class SocialWallView extends GetView<SocialController> {
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(10),
                                 child: Image.file(
-                                  File(controller.selectedImages[index]),
+                                  File(image.path),
                                   width: ScreenUtil().setWidth(100),
                                   height: ScreenUtil().setHeight(100),
                                   fit: BoxFit.cover,
@@ -97,7 +99,7 @@ class SocialWallView extends GetView<SocialController> {
                                 top: 5,
                                 right: 5,
                                 child: GestureDetector(
-                                  onTap: () => controller.removeImage(index),
+                                  onTap: () => controller.removeNewPostImage(image),
                                   child: Container(
                                     padding: const EdgeInsets.all(4),
                                     decoration: const BoxDecoration(
@@ -126,7 +128,7 @@ class SocialWallView extends GetView<SocialController> {
             Row(
               children: [
                 IconButton(
-                  onPressed: controller.pickImage,
+                  onPressed: controller.pickImages,
                   icon: const Icon(Icons.photo_library, color: AppTheme.primaryYellow),
                 ),
                 const Spacer(),
@@ -154,6 +156,10 @@ class SocialWallView extends GetView<SocialController> {
   }
 
   Widget _buildPostCard(Map<String, dynamic> post) {
+    final user = post['user'] as Map<String, dynamic>? ?? {};
+    final isLiked = post['is_liked_by_user'] as bool? ?? false;
+    final likesCount = post['likes_count'] as int? ?? 0;
+
     return Card(
       margin: EdgeInsets.only(bottom: ScreenUtil().setHeight(15)),
       child: Padding(
@@ -165,8 +171,13 @@ class SocialWallView extends GetView<SocialController> {
             Row(
               children: [
                 CircleAvatar(
-                  backgroundColor: AppTheme.primaryYellow,
-                  child: const Icon(Icons.person, color: AppTheme.darkText),
+                  backgroundColor: AppTheme.lightYellow,
+                  backgroundImage: (user['profile_photo_url'] != null && user['profile_photo_url'].isNotEmpty)
+                      ? CachedNetworkImageProvider(user['profile_photo_url'])
+                      : null,
+                  child: (user['profile_photo_url'] == null || user['profile_photo_url'].isEmpty)
+                      ? const Icon(Icons.person, color: AppTheme.darkText)
+                      : null,
                 ),
                 SizedBox(width: ScreenUtil().setWidth(10)),
                 Expanded(
@@ -174,14 +185,14 @@ class SocialWallView extends GetView<SocialController> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        post['userName'] ?? 'Anonymous',
+                        user['name'] ?? 'Anonymous',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: ScreenUtil().setSp(16),
                         ),
                       ),
                       Text(
-                        _formatDate(post['createdAt']),
+                        _formatDate(post['created_at']),
                         style: TextStyle(
                           color: AppTheme.lightText,
                           fontSize: ScreenUtil().setSp(12),
@@ -197,9 +208,12 @@ class SocialWallView extends GetView<SocialController> {
             
             // Post Text
             if (post['text']?.isNotEmpty == true)
-              Text(
-                post['text'],
-                style: TextStyle(fontSize: ScreenUtil().setSp(14)),
+              Padding(
+                padding: EdgeInsets.only(bottom: ScreenUtil().setHeight(10)),
+                child: Text(
+                  post['text'],
+                  style: TextStyle(fontSize: ScreenUtil().setSp(14)),
+                ),
               ),
             
             // Post Images
@@ -239,36 +253,43 @@ class SocialWallView extends GetView<SocialController> {
             // Action Buttons
             Row(
               children: [
-                GestureDetector(
-                  onTap: () => controller.likePost(post['id']),
-                  child: Row(
-                    children: [
-                      Icon(
-                        (post['likes'] ?? []).contains(controller.currentUserId)
-                            ? Icons.favorite
-                            : Icons.favorite_border,
-                        color: (post['likes'] ?? []).contains(controller.currentUserId)
-                            ? Colors.red
-                            : AppTheme.lightText,
-                      ),
-                      SizedBox(width: ScreenUtil().setWidth(5)),
-                      Text(
-                        '${(post['likes'] ?? []).length}',
-                        style: TextStyle(color: AppTheme.lightText),
-                      ),
-                    ],
+                InkWell(
+                  onTap: () => controller.likePost(post['id'].toString()),
+                  borderRadius: BorderRadius.circular(20),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isLiked ? Icons.favorite : Icons.favorite_border,
+                          color: isLiked ? Colors.red : AppTheme.lightText,
+                        ),
+                        SizedBox(width: ScreenUtil().setWidth(5)),
+                        Text(
+                          '$likesCount',
+                          style: TextStyle(color: AppTheme.lightText),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 SizedBox(width: ScreenUtil().setWidth(20)),
-                Row(
-                  children: [
-                    const Icon(Icons.comment, color: AppTheme.lightText),
-                    SizedBox(width: ScreenUtil().setWidth(5)),
-                    Text(
-                      '${(post['comments'] ?? []).length}',
-                      style: TextStyle(color: AppTheme.lightText),
+                InkWell(
+                  onTap: () { /* TODO: Implement comment functionality */ },
+                  borderRadius: BorderRadius.circular(20),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.comment_outlined, color: AppTheme.lightText),
+                        SizedBox(width: ScreenUtil().setWidth(5)),
+                        Text(
+                          '${post['comments_count'] ?? 0}',
+                          style: TextStyle(color: AppTheme.lightText),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ],
             ),
@@ -310,16 +331,16 @@ class SocialWallView extends GetView<SocialController> {
   }
 
   void _showAddFriendDialog(BuildContext context) {
-    final usernameController = TextEditingController();
+    final userIdController = TextEditingController();
     
     Get.dialog(
       AlertDialog(
         title: const Text('Add Friend'),
         content: TextField(
-          controller: usernameController,
+          controller: userIdController,
           decoration: const InputDecoration(
-            labelText: 'Username',
-            hintText: 'Enter username to add as friend',
+            labelText: 'User ID',
+            hintText: 'Enter the ID of the user to add',
           ),
         ),
         actions: [
@@ -329,8 +350,8 @@ class SocialWallView extends GetView<SocialController> {
           ),
           ElevatedButton(
             onPressed: () {
-              if (usernameController.text.trim().isNotEmpty) {
-                controller.addFriend(usernameController.text.trim());
+              if (userIdController.text.trim().isNotEmpty) {
+                controller.addFriend(userIdController.text.trim());
                 Get.back();
               }
             },
@@ -341,15 +362,17 @@ class SocialWallView extends GetView<SocialController> {
     );
   }
 
-  String _formatDate(dynamic timestamp) {
-    if (timestamp == null) return '';
+  String _formatDate(String? dateString) {
+    if (dateString == null) return '';
     
     try {
-      final date = timestamp.toDate();
+      final date = DateTime.parse(dateString).toLocal();
       final now = DateTime.now();
       final difference = now.difference(date);
       
-      if (difference.inDays > 0) {
+      if (difference.inDays > 7) {
+        return DateFormat.yMMMd().format(date);
+      } else if (difference.inDays > 0) {
         return '${difference.inDays}d ago';
       } else if (difference.inHours > 0) {
         return '${difference.inHours}h ago';
@@ -359,6 +382,7 @@ class SocialWallView extends GetView<SocialController> {
         return 'Just now';
       }
     } catch (e) {
+      print('Error formatting date: $e');
       return '';
     }
   }

@@ -299,23 +299,28 @@ class RestaurantsView extends GetView<RestaurantsController> {
           children: [
             Text('How would you rate this restaurant?'),
             SizedBox(height: ScreenUtil().setHeight(20)),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(5, (index) {
-                return GestureDetector(
-                  onTap: () {
-                    rating = index + 1.0;
-                  },
-                  child: Icon(
-                    index < rating ? Icons.star : Icons.star_border,
-                    color: AppTheme.primaryYellow,
-                    size: ScreenUtil().setSp(30),
+            StatefulBuilder(builder: (context, setState) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(5, (index) {
+                      return GestureDetector(
+                        onTap: () => setState(() => rating = index + 1.0),
+                        child: Icon(
+                          index < rating ? Icons.star : Icons.star_border,
+                          color: AppTheme.primaryYellow,
+                          size: ScreenUtil().setSp(30),
+                        ),
+                      );
+                    }),
                   ),
-                );
-              }),
-            ),
-            SizedBox(height: ScreenUtil().setHeight(10)),
-            Text('${rating.toInt()} stars'),
+                  SizedBox(height: ScreenUtil().setHeight(10)),
+                  Text('${rating.toInt()} stars'),
+                ],
+              );
+            }),
           ],
         ),
         actions: [
@@ -399,7 +404,7 @@ class RestaurantsView extends GetView<RestaurantsController> {
           ),
           ElevatedButton(
             onPressed: () {
-              controller.createRestaurant();
+              controller.saveRestaurant();
               Get.back();
             },
             child: const Text('Add Restaurant'),

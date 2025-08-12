@@ -93,8 +93,13 @@ class DatingView extends GetView<DatingController> {
         children: [
           CircleAvatar(
             radius: ScreenUtil().setSp(30),
-            backgroundColor: AppTheme.primaryYellow,
-            child: const Icon(Icons.person, color: AppTheme.darkText),
+            backgroundColor: AppTheme.lightYellow,
+            backgroundImage: (match['photo_url'] != null && match['photo_url'].isNotEmpty)
+                ? CachedNetworkImageProvider(match['photo_url'])
+                : null,
+            child: (match['photo_url'] == null || match['photo_url'].isEmpty)
+                ? const Icon(Icons.person, color: AppTheme.darkText)
+                : null,
           ),
           SizedBox(height: ScreenUtil().setHeight(5)),
           Text(
@@ -131,14 +136,16 @@ class DatingView extends GetView<DatingController> {
             left: ScreenUtil().setWidth(20),
             right: ScreenUtil().setWidth(20),
             child: GestureDetector(
-              onPanUpdate: (details) {
+              onPanEnd: (details) {
                 // Handle swipe gestures
-                if (details.delta.dx > 50) {
+                if (details.velocity.pixelsPerSecond.dx.abs() < 500) return; // Ignore slow pans
+
+                if (details.velocity.pixelsPerSecond.dx > 0) {
                   // Swipe right
-                  controller.swipeRight(controller.potentialMatches.first['id']);
-                } else if (details.delta.dx < -50) {
+                  controller.swipe(controller.potentialMatches.first['id'].toString(), 'right');
+                } else {
                   // Swipe left
-                  controller.swipeLeft(controller.potentialMatches.first['id']);
+                  controller.swipe(controller.potentialMatches.first['id'].toString(), 'left');
                 }
               },
               child: _buildProfileCard(controller.potentialMatches.first, true),
