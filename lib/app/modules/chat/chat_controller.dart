@@ -1,138 +1,172 @@
+import 'dart:async';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../data/api_config.dart';
 
 class ChatController extends GetxController {
-  // API base URL - replace with your Laravel API endpoint
-  final String apiBaseUrl = 'https://your-laravel-api.com/api';
   
   final RxBool isLoading = false.obs;
   final RxString errorMessage = ''.obs;
   final RxList<Map<String, dynamic>> matches = <Map<String, dynamic>>[].obs;
   final RxList<Map<String, dynamic>> messages = <Map<String, dynamic>>[].obs;
+
   final RxString newMessage = ''.obs;
-  final RxString selectedMatchId = ''.obs;
+  final RxString currentMatchId = ''.obs;
+  final RxString currentChatPartnerName = ''.obs;
+
+  Timer? _pollingTimer;
+  String? currentUserId;
 
   @override
   void onInit() {
     super.onInit();
+    _loadCurrentUser();
     loadMatches();
   }
 
-  Future<void> loadMatches() async {
-    try {
-      isLoading.value = true;
-      
-      // Get auth token from SharedPreferences
+  @override
+  void onClose() {
+    _pollingTimer?.cancel();
+    super.onClose();
+  }
+
+  Future<void> _loadCurrentUser() async {
       final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null) return;
+      // Assuming user ID is stored as a string. Adapt if it's an int.
+      currentUserId = prefs.getString('user_id');
+  }
 
-      // Call API to get matches
-      final response = await http.get(
-        Uri.parse('$apiBaseUrl/matches'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+  Future<void> _withAuthToken(Future<void> Function(String token) action) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) {
+      errorMessage.value = 'Authentication error. Please log in again.';
+      return;
+    }
+    await action(token);
+  }
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        matches.value = List<Map<String, dynamic>>.from(data['matches']);
+  Future<void> loadMatches() async {
+    await _withAuthToken((token) async {
+      try {
+        isLoading.value = true;
+        errorMessage.value = '';
+        final response = await http.get(
+          Uri.parse('${ApiConfig.baseUrl}/matches'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Accept': 'application/json',
+          },
+        );
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          matches.value = List<Map<String, dynamic>>.from(data['matches']);
+        } else {
+          errorMessage.value = 'Failed to load matches: ${response.body}';
+        }
+      } catch (e) {
+        errorMessage.value = 'An error occurred: $e';
+      } finally {
+        isLoading.value = false;
       }
-    } catch (e) {
-      errorMessage.value = 'Failed to load matches';
-    } finally {
-      isLoading.value = false;
+    });
+  }
+
+  void selectMatch(String matchId, String partnerName) {
+    if (currentMatchId.value == matchId) return;
+
+    currentMatchId.value = matchId;
+    currentChatPartnerName.value = partnerName;
+    messages.clear();
+    _pollingTimer?.cancel();
+
+    if (matchId.isNotEmpty) {
+      loadMessages();
+      _pollingTimer = Timer.periodic(const Duration(seconds: 5), (_) => loadMessages(isPolling: true));
     }
   }
 
-  Future<void> loadMessages(String matchId) async {
-    try {
-      selectedMatchId.value = matchId;
-      
-      final QuerySnapshot snapshot = await _firestore
-          .collection('matches')
-          .doc(matchId)
-          .collection('messages')
-          .orderBy('timestamp', descending: false)
-          .get();
+  Future<void> loadMessages({bool isPolling = false}) async {
+    if (currentMatchId.value.isEmpty) return;
 
-      messages.value = snapshot.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        return {
-          'id': doc.id,
-          ...data,
-        };
-      }).toList();
-    } catch (e) {
-      errorMessage.value = 'Failed to load messages';
-    }
+    await _withAuthToken((token) async {
+      if (!isPolling) isLoading.value = true;
+      errorMessage.value = '';
+      try {
+        final response = await http.get(
+          Uri.parse('${ApiConfig.baseUrl}/matches/${currentMatchId.value}/messages'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Accept': 'application/json',
+          },
+        );
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          final newMessages = List<Map<String, dynamic>>.from(data['messages']);
+          if (newMessages.length > messages.length) {
+              messages.value = newMessages;
+          }
+        } else {
+          errorMessage.value = 'Failed to load messages: ${response.body}';
+        }
+      } catch (e) {
+        errorMessage.value = 'An error occurred: $e';
+      } finally {
+        if (!isPolling) isLoading.value = false;
+      }
+    });
   }
 
-  Future<void> sendMessage(String text) async {
-    if (text.trim().isEmpty || selectedMatchId.value.isEmpty) return;
+  Future<void> sendMessage() async {
+    final text = newMessage.value.trim();
+    if (text.isEmpty || currentMatchId.value.isEmpty) return;
 
-    try {
-      final user = _auth.currentUser;
-      if (user == null) return;
+    final optimisticMessage = {
+      'text': text,
+      'sender_id': currentUserId,
+      'created_at': DateTime.now().toIso8601String(),
+      'is_optimistic': true,
+    };
+    messages.add(optimisticMessage);
+    final originalMessage = newMessage.value;
+    newMessage.value = '';
 
-      await _firestore
-          .collection('matches')
-          .doc(selectedMatchId.value)
-          .collection('messages')
-          .add({
-        'text': text.trim(),
-        'senderId': user.uid,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
+    await _withAuthToken((token) async {
+      try {
+        final response = await http.post(
+          Uri.parse('${ApiConfig.baseUrl}/matches/${currentMatchId.value}/messages'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: json.encode({'text': text}),
+        );
 
-      // Update last message in match
-      await _firestore.collection('matches').doc(selectedMatchId.value).update({
-        'lastMessage': text.trim(),
-        'lastMessageTime': FieldValue.serverTimestamp(),
-      });
-
-      newMessage.value = '';
-      await loadMessages(selectedMatchId.value);
-    } catch (e) {
-      errorMessage.value = 'Failed to send message';
-    }
+        messages.removeWhere((m) => m['is_optimistic'] == true);
+        if (response.statusCode == 201) {
+            final sentMessage = json.decode(response.body)['message'];
+            messages.add(sentMessage);
+        } else {
+          errorMessage.value = 'Failed to send message: ${response.body}';
+          newMessage.value = originalMessage; // Restore text on failure
+        }
+      } catch (e) {
+        errorMessage.value = 'An error occurred: $e';
+        messages.removeWhere((m) => m['is_optimistic'] == true);
+        newMessage.value = originalMessage;
+      }
+    });
   }
 
-  Future<String> getOtherUserName(String matchId) async {
-    try {
-      final user = _auth.currentUser;
-      if (user == null) return 'Unknown';
-
-      final matchDoc = await _firestore.collection('matches').doc(matchId).get();
-      if (!matchDoc.exists) return 'Unknown';
-
-      final data = matchDoc.data() as Map<String, dynamic>;
-      final users = List<String>.from(data['users'] ?? []);
-      
-      final otherUserId = users.firstWhere((id) => id != user.uid, orElse: () => '');
-      if (otherUserId.isEmpty) return 'Unknown';
-
-      final userDoc = await _firestore.collection('users').doc(otherUserId).get();
-      if (!userDoc.exists) return 'Unknown';
-
-      final userData = userDoc.data() as Map<String, dynamic>;
-      return userData['name'] ?? 'Unknown';
-    } catch (e) {
-      return 'Unknown';
-    }
+  void onNewMessageChanged(String text) {
+    newMessage.value = text;
   }
 
   void clearError() {
     errorMessage.value = '';
   }
-
-  void updateNewMessage(String value) {
-    newMessage.value = value;
-  }
-
-  String get currentUserId => _auth.currentUser?.uid ?? '';
 }
