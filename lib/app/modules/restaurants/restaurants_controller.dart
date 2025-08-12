@@ -1,14 +1,13 @@
 import 'package:get/get.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class RestaurantsController extends GetxController {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseStorage _storage = FirebaseStorage.instance;
+  // API base URL - replace with your Laravel API endpoint
+  final String apiBaseUrl = 'https://your-laravel-api.com/api';
   final ImagePicker _picker = ImagePicker();
   
   final RxBool isLoading = false.obs;
@@ -36,18 +35,23 @@ class RestaurantsController extends GetxController {
   Future<void> loadRestaurants() async {
     try {
       isLoading.value = true;
-      final QuerySnapshot snapshot = await _firestore
-          .collection('restaurants')
-          .where('isActive', isEqualTo: true)
-          .orderBy('rating', descending: true)
-          .get();
+      
+      // Get auth token from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
+      
+      // Call API to get restaurants
+      final response = await http.get(
+        Uri.parse('$apiBaseUrl/restaurants'),
+        headers: {
+          'Authorization': token != null ? 'Bearer $token' : '',
+          'Content-Type': 'application/json',
+        },
+      );
 
-      restaurants.value = snapshot.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        return {
-          'id': doc.id,
-          ...data,
-        };
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        restaurants.value = List<Map<String, dynamic>>.from(data['restaurants']);
       }).toList();
     } catch (e) {
       errorMessage.value = 'Failed to load restaurants';
@@ -274,4 +278,4 @@ class RestaurantsController extends GetxController {
   void updateAddress(String value) => address.value = value;
   void updatePhone(String value) => phone.value = value;
   void updateWebsite(String value) => website.value = value;
-} 
+}

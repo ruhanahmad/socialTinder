@@ -1,10 +1,11 @@
 import 'package:get/get.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ChatController extends GetxController {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  // API base URL - replace with your Laravel API endpoint
+  final String apiBaseUrl = 'https://your-laravel-api.com/api';
   
   final RxBool isLoading = false.obs;
   final RxString errorMessage = ''.obs;
@@ -22,21 +23,25 @@ class ChatController extends GetxController {
   Future<void> loadMatches() async {
     try {
       isLoading.value = true;
-      final user = _auth.currentUser;
-      if (user == null) return;
+      
+      // Get auth token from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
+      if (token == null) return;
 
-      final QuerySnapshot snapshot = await _firestore
-          .collection('matches')
-          .where('users', arrayContains: user.uid)
-          .get();
+      // Call API to get matches
+      final response = await http.get(
+        Uri.parse('$apiBaseUrl/matches'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
 
-      matches.value = snapshot.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        return {
-          'id': doc.id,
-          ...data,
-        };
-      }).toList();
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        matches.value = List<Map<String, dynamic>>.from(data['matches']);
+      }
     } catch (e) {
       errorMessage.value = 'Failed to load matches';
     } finally {
@@ -130,4 +135,4 @@ class ChatController extends GetxController {
   }
 
   String get currentUserId => _auth.currentUser?.uid ?? '';
-} 
+}

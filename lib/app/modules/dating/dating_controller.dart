@@ -1,11 +1,12 @@
 import 'package:get/get.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class DatingController extends GetxController {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  // API base URL - replace with your Laravel API endpoint
+  final String apiBaseUrl = 'https://your-laravel-api.com/api';
   
   final RxBool isLoading = false.obs;
   final RxString errorMessage = ''.obs;
@@ -37,17 +38,27 @@ class DatingController extends GetxController {
   Future<void> loadPotentialMatches() async {
     try {
       isLoading.value = true;
-      final user = _auth.currentUser;
-      if (user == null) return;
+      
+      // Get auth token from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
+      if (token == null) return;
 
-      // Get current user's profile
-      final userDoc = await _firestore.collection('users').doc(user.uid).get();
-      if (!userDoc.exists) return;
+      // Call API to get potential matches
+      final response = await http.get(
+        Uri.parse('$apiBaseUrl/dating/potential-matches'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
 
-      final userData = userDoc.data() as Map<String, dynamic>;
-      final userGender = userData['gender'] ?? '';
-      final userAge = userData['age'] ?? 25;
-      final userLocation = userData['location'] ?? '';
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        potentialMatches.value = List<Map<String, dynamic>>.from(data['matches']);
+      } else {
+        errorMessage.value = 'Failed to load potential matches';
+      }
 
       // Build query based on filters
       Query query = _firestore.collection('users')
@@ -188,4 +199,4 @@ class DatingController extends GetxController {
   void clearError() {
     errorMessage.value = '';
   }
-} 
+}

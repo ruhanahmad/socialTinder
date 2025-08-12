@@ -1,12 +1,14 @@
 import 'package:get/get.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
 import '../../routes/app_routes.dart';
 
 class AuthController extends GetxController {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  // API base URL - replace with your Laravel API endpoint
+  final String apiBaseUrl = 'https://your-laravel-api.com/api';
   
   final RxBool isLoading = false.obs;
   final RxString errorMessage = ''.obs;
+  final RxString token = ''.obs;
 
   @override
   void onInit() {
@@ -19,14 +21,25 @@ class AuthController extends GetxController {
       isLoading.value = true;
       errorMessage.value = '';
       
-      await _auth.signInWithEmailAndPassword(
-        email: email,
-        password: password,
+      // Call Laravel API for login
+      final response = await http.post(
+        Uri.parse('$apiBaseUrl/login'),
+        body: {
+          'email': email,
+          'password': password,
+        },
       );
       
-      Get.offAllNamed(AppRoutes.PROFILE_SETUP);
-    } on FirebaseAuthException catch (e) {
-      errorMessage.value = _getErrorMessage(e.code);
+      if (response.statusCode == 200) {
+        // Parse the response and save token
+        // This is a placeholder - adjust based on your API response structure
+        // final responseData = jsonDecode(response.body);
+        // token.value = responseData['token'];
+        
+        Get.offAllNamed(AppRoutes.PROFILE_SETUP);
+      } else {
+        errorMessage.value = 'Invalid credentials';
+      }
     } catch (e) {
       errorMessage.value = 'An error occurred. Please try again.';
     } finally {
@@ -39,14 +52,26 @@ class AuthController extends GetxController {
       isLoading.value = true;
       errorMessage.value = '';
       
-      await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
+      // Call Laravel API for registration
+      final response = await http.post(
+        Uri.parse('$apiBaseUrl/register'),
+        body: {
+          'email': email,
+          'password': password,
+          'password_confirmation': password,
+        },
       );
       
-      Get.offAllNamed(AppRoutes.PROFILE_SETUP);
-    } on FirebaseAuthException catch (e) {
-      errorMessage.value = _getErrorMessage(e.code);
+      if (response.statusCode == 201) {
+        // Parse the response and save token
+        // This is a placeholder - adjust based on your API response structure
+        // final responseData = jsonDecode(response.body);
+        // token.value = responseData['token'];
+        
+        Get.offAllNamed(AppRoutes.PROFILE_SETUP);
+      } else {
+        errorMessage.value = 'Registration failed';
+      }
     } catch (e) {
       errorMessage.value = 'An error occurred. Please try again.';
     } finally {
@@ -54,18 +79,17 @@ class AuthController extends GetxController {
     }
   }
 
-  String _getErrorMessage(String code) {
-    switch (code) {
-      case 'user-not-found':
-        return 'No user found with this email.';
-      case 'wrong-password':
-        return 'Wrong password provided.';
-      case 'email-already-in-use':
+  // Helper method to handle API error responses
+  String _getErrorMessage(int statusCode) {
+    switch (statusCode) {
+      case 401:
+        return 'Invalid credentials.';
+      case 422:
+        return 'Validation error. Please check your input.';
+      case 409:
         return 'An account already exists with this email.';
-      case 'weak-password':
-        return 'The password provided is too weak.';
-      case 'invalid-email':
-        return 'Please enter a valid email address.';
+      case 500:
+        return 'Server error. Please try again later.';
       default:
         return 'An error occurred. Please try again.';
     }
@@ -74,4 +98,4 @@ class AuthController extends GetxController {
   void clearError() {
     errorMessage.value = '';
   }
-} 
+}

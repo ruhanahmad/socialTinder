@@ -1,15 +1,14 @@
 import 'package:get/get.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
+import 'dart:convert';
 import '../../routes/app_routes.dart';
 
 class ProfileController extends GetxController {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseStorage _storage = FirebaseStorage.instance;
+  // API base URL - replace with your Laravel API endpoint
+  final String apiBaseUrl = 'https://your-laravel-api.com/api';
   final ImagePicker _picker = ImagePicker();
   
   final RxBool isLoading = false.obs;
@@ -68,13 +67,38 @@ class ProfileController extends GetxController {
 
       if (image != null) {
         isLoading.value = true;
-        final String fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
-        final Reference ref = _storage.ref().child('profile_photos/$fileName');
         
-        await ref.putFile(File(image.path));
-        final String downloadUrl = await ref.getDownloadURL();
+        // Get auth token from SharedPreferences
+        final prefs = await SharedPreferences.getInstance();
+        final token = prefs.getString('auth_token');
+        if (token == null) {
+          errorMessage.value = 'User not authenticated.';
+          isLoading.value = false;
+          return;
+        }
         
-        photos.add(downloadUrl);
+        // Create form data for image upload
+        var request = http.MultipartRequest(
+          'POST',
+          Uri.parse('$apiBaseUrl/profile/upload-photo'),
+        );
+        
+        request.headers['Authorization'] = 'Bearer $token';
+        request.files.add(await http.MultipartFile.fromPath(
+          'photo',
+          image.path,
+        ));
+        
+        var response = await request.send();
+        
+        if (response.statusCode == 200) {
+          var responseData = await response.stream.bytesToString();
+          var data = json.decode(responseData);
+          photos.add(data['photo_url']);
+        } else {
+          errorMessage.value = 'Failed to upload image. Please try again.';
+        }
+        
         isLoading.value = false;
       }
     } catch (e) {
@@ -100,8 +124,10 @@ class ProfileController extends GetxController {
       isLoading.value = true;
       errorMessage.value = '';
 
-      final user = _auth.currentUser;
-      if (user == null) {
+      // Get auth token from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
+      if (token == null) {
         errorMessage.value = 'User not authenticated.';
         return;
       }
@@ -115,16 +141,23 @@ class ProfileController extends GetxController {
         'height': height.value,
         'interests': interests.toList(),
         'photos': photos.toList(),
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .set(profileData, SetOptions(merge: true));
+      // Call API to save profile
+      final response = await http.post(
+        Uri.parse('$apiBaseUrl/profile'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode(profileData),
+      );
 
-      Get.offAllNamed(AppRoutes.MAIN_HOME);
+      if (response.statusCode == 200) {
+        Get.offAllNamed(AppRoutes.MAIN_HOME);
+      } else {
+        errorMessage.value = 'Failed to save profile. Please try again.';
+      }
     } catch (e) {
       errorMessage.value = 'Failed to save profile. Please try again.';
     } finally {
@@ -135,4 +168,4 @@ class ProfileController extends GetxController {
   void clearError() {
     errorMessage.value = '';
   }
-} 
+}
